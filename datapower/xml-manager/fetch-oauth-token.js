@@ -1,17 +1,24 @@
 /**
  * XML Manager scheduled GatewayScript (IBM API Connect / DataPower v10.0.8.10).
  *
+ * XML Manager interval: 120 seconds.
+ *
  * Retry pattern matches the working OAuth xml-manager script (urlopen callback +
  * setTimeout recursion). The retry loop is the webapi health check, not the token
  * call. After HTTP 200 from /webapi-init-check, the credentials-manager token is
  * fetched once and stored on system.dfap.*.
+ *
+ * In-script retries are capped so one tick cannot overlap the next 120s run:
+ * 2 health checks (first + 1 retry after 20s) + token fetch (timeout 56s)
+ * worst case is about 96s.
  */
 var url = require("urlopen");
 var system = require("system-metadata");
 var sm = require("service-metadata");
 
-// Configuration — 60 * 20s = 20 minutes, same overall window as 240 * 5s
-var MAX_RETRIES = 60;
+// Schedule is 120s. Do not use a long in-script loop (e.g. 20 minutes).
+// MAX_RETRIES is extra attempts after the first call: 1 => 2 health checks total.
+var MAX_RETRIES = 1;
 var RETRY_DELAY_MS = 20000;
 var HEALTH_CHECK_TIMEOUT_SEC = 10;
 var TOKEN_TIMEOUT_SEC = 56;
