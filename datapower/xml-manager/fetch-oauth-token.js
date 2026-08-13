@@ -9,9 +9,9 @@
  * fetched once and stored on system.dfap.*.
  *
  * Health checks run every 20s through the 120s window (t=0,20,40,60,80,100).
- * The next wait is not scheduled at t=120 so this tick does not collide with
- * the next scheduled run. If a late 200 starts a token fetch that crosses 120s,
- * the next tick skips via oauth_refresh_in_progress.
+ * webapi-init-check itself returns in milliseconds (ready vs not ready).
+ * The remaining overlap risk is only the token fetch after a successful
+ * attempt near t=100 (token timeout 56s can cross the next 120s tick).
  */
 var url = require("urlopen");
 var system = require("system-metadata");
@@ -20,7 +20,8 @@ var sm = require("service-metadata");
 // Extra attempts after the first call. 5 => 6 checks at 0/20/40/60/80/100s.
 var MAX_RETRIES = 5;
 var RETRY_DELAY_MS = 20000;
-var HEALTH_CHECK_TIMEOUT_SEC = 10;
+// Hang safety only; the built-in health check answers immediately.
+var HEALTH_CHECK_TIMEOUT_SEC = 2;
 var TOKEN_TIMEOUT_SEC = 56;
 
 function resolveDeviceConfig() {
