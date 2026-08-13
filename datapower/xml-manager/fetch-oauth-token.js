@@ -62,9 +62,8 @@ function clearRefreshFlag() {
 
 function checkWebapi(retriesLeft) {
     var attemptNum = MAX_RETRIES - retriesLeft + 1;
-    console.error("WebAPI init-check attempt #" + attemptNum + ". Retries left: " + retriesLeft);
-
     var cfg = resolveDeviceConfig();
+    console.error(cfg.deviceName + ": health check #" + attemptNum + ". Retries left: " + retriesLeft);
 
     if (!cfg.tls_profile || !cfg.healthCheckTarget) {
         console.warn("TLS profile / health-check URL not yet determined for device: " + cfg.deviceName + ". Configuration may be pending. Retrying...");
@@ -100,18 +99,18 @@ function checkWebapi(retriesLeft) {
             discardResponse(response);
 
             if (statusCode === 401 || statusCode === 403) {
-                console.error("Permanent authentication error on webapi-init-check (" + statusCode + "). Aborting retries.");
+                console.error("Permanent authentication error on " + cfg.deviceName + " health check (" + statusCode + "). Aborting retries.");
                 clearRefreshFlag();
                 return;
             }
 
             if (statusCode !== 200) {
-                console.error("webapi-init-check status " + statusCode + ". Retrying...");
+                console.error(cfg.deviceName + ": health check " + statusCode + ". Retrying...");
                 handleRetry(retriesLeft, "Health Check Status " + statusCode);
                 return;
             }
 
-            console.error("webapi-init-check 200 on attempt #" + attemptNum + ". Fetching OAuth token.");
+            console.error(cfg.deviceName + ": health check 200 on attempt #" + attemptNum + ". Fetching OAuth token.");
             fetchToken(cfg.tls_profile);
         });
     } catch (e) {

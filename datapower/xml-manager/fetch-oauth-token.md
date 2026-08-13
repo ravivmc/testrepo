@@ -164,6 +164,44 @@ t=240    next run proceeds normally
 
 The overlap skip exists because the **token** call can take up to 56 seconds. The health check itself does not delay until t=120 after a 200.
 
+## Testing a copy inside an API (common errors)
+
+The XML Manager script is written for a scheduled rule (NULL input/output). A copy pasted into an API GatewayScript action can fail for reasons that are not health-check related.
+
+### 1. `cfg` used before it is assigned (this is the likely error)
+
+This pattern throws immediately on the first line of `checkWebapi`:
+
+```javascript
+console.error(cfg.deviceName + ": health check #" + attemptNum + "...");
+var cfg = resolveDeviceConfig();
+```
+
+`var cfg` is hoisted as `undefined`, so `cfg.deviceName` is `TypeError: Cannot read property 'deviceName' of undefined` (GatewayScript processing error).
+
+Resolve config first, then log:
+
+```javascript
+var cfg = resolveDeviceConfig();
+console.error(cfg.deviceName + ": health check #" + attemptNum + "...");
+```
+
+### 2. `deviceName` is not in scope
+
+In the 401/403 branch, `deviceName` is a local variable inside `resolveDeviceConfig()`. Use `cfg.deviceName`.
+
+### 3. In-progress flag stuck after that throw
+
+The script sets `system.dfap.oauth_refresh_in_progress = true` **before** `checkWebapi()`. If `checkWebapi` throws synchronously, the flag is never cleared. The next invoke logs skip and does nothing. After fixing the script, set `system.dfap.oauth_refresh_in_progress = false` once (or wait for a domain restart) so later runs are not skipped.
+
+### 4. API timeouts vs 20s retries
+
+An API transaction will not wait through t=0..100. Client/API timeouts will kill `setTimeout` retries. For an API smoke test, use `RETRY_DELAY_MS = 1000` and `MAX_RETRIES = 1`, or call the health check once with no retry.
+
+### 5. APIs need a response body
+
+XML Manager scheduled rules use NULL output. An API GatewayScript action usually must write `session.output` (or the next assemble step has no payload). That looks like a runtime error even if logs show success.
+
 ## What this script does not do
 
 - It does not retry the token URL in the same tick.
