@@ -12,6 +12,8 @@
  * webapi-init-check itself returns in milliseconds (ready vs not ready).
  * The remaining overlap risk is only the token fetch after a successful
  * attempt near t=100 (token timeout 56s can cross the next 120s tick).
+ * oauth_refresh_in_progress is set only when the token fetch starts, and
+ * expires after TOKEN_TIMEOUT_SEC so a failed first run cannot skip forever.
  */
 var url = require("urlopen");
 var system = require("system-metadata");
@@ -49,7 +51,11 @@ function resolveDeviceConfig() {
 function discardResponse(response) {
     try {
         if (response && typeof response.discard === "function") {
-            response.discard();
+            response.discard(function (error) {
+                if (error) {
+                    console.error("discard error: " + JSON.stringify(error));
+                }
+            });
         }
     } catch (e) {
         // connection closes when the callback returns
@@ -58,6 +64,25 @@ function discardResponse(response) {
 
 function clearRefreshFlag() {
     system.dfap.oauth_refresh_in_progress = false;
+    system.dfap.oauth_refresh_started_at = 0;
+}
+
+function isRefreshInProgress() {
+    if (!system.dfap) {
+        return false;
+    }
+    var startedAt = Number(system.dfap.oauth_refresh_started_at);
+    if (startedAt > 0) {
+        var ageMs = Date.now() - startedAt;
+        return ageMs >= 0 && ageMs < ((TOKEN_TIMEOUT_SEC + 5) * 1000);
+    }
+    // Ignore a leftover boolean from an older script version with no timestamp.
+    return false;
+}
+
+function markRefreshStarted() {
+    system.dfap.oauth_refresh_in_progress = true;
+    system.dfap.oauth_refresh_started_at = Date.now();
 }
 
 function checkWebapi(retriesLeft) {
@@ -100,7 +125,6 @@ function checkWebapi(retriesLeft) {
 
             if (statusCode === 401 || statusCode === 403) {
                 console.error("Permanent authentication error on " + cfg.deviceName + " health check (" + statusCode + "). Aborting retries.");
-                clearRefreshFlag();
                 return;
             }
 
@@ -125,6 +149,7 @@ function checkWebapi(retriesLeft) {
 }
 
 function fetchToken(tls_profile) {
+    markRefreshStarted();
     var options = {
         target: "http://miintegrate-dev-credentials-manager.dhhs-somhub-dev-dp-ns.svc.cluster.local/token?provider=dev_isd",
         method: "GET",
@@ -190,13 +215,12 @@ function handleRetry(retriesLeft, reason) {
         }, RETRY_DELAY_MS);
     } else {
         console.error("No more retries in this 120s window. Last error: " + reason + ". Next XML Manager tick will try again.");
-        clearRefreshFlag();
     }
 }
 
-if (system.dfap && system.dfap.oauth_refresh_in_progress) {
-    console.error("oauth-token-refresh: skip, a refresh from the previous tick is still running");
+if (isRefreshInProgress()) {
+    console.error("oauth-token-refresh: skip, a token fetch from the previous tick is still running");
 } else {
-    system.dfap.oauth_refresh_in_progress = true;
+    clearRefreshFlag();
     checkWebapi(MAX_RETRIES);
 }

@@ -52,17 +52,10 @@ checkWebapi()  ---- GET /webapi-init-check ----
 
 At the top of the script:
 
-- If `system.dfap.oauth_refresh_in_progress` is true, this tick **does not** health-check or fetch a token. The XML Manager still ran; the script exits.
-- Otherwise the flag is set to true and the health-check loop starts.
-
-The flag lives in `system-metadata` (same store as the tokens), so it is visible to the next 120s tick.
-
-The flag is cleared when:
-
-- the token is stored successfully
-- the token call fails
-- health check returns 401/403
-- all 6 health checks in this window have failed
+- Skip only if a **token fetch** is in progress: `oauth_refresh_started_at` is set and newer than `TOKEN_TIMEOUT_SEC + 5s`.
+- The flag is **not** set at the start of the health-check loop. A failed first run cannot leave `oauth_refresh_in_progress=true` forever.
+- `clearRefreshFlag()` at the start of a normal tick also clears a leftover boolean from the older script.
+- The flag is set in `fetchToken()` (`markRefreshStarted`) and cleared when that call finishes.
 
 The schedule itself is never disabled. Skip means “this invocation returns without work.”
 
@@ -190,9 +183,9 @@ console.error(cfg.deviceName + ": health check #" + attemptNum + "...");
 
 In the 401/403 branch, `deviceName` is a local variable inside `resolveDeviceConfig()`. Use `cfg.deviceName`.
 
-### 3. In-progress flag stuck after that throw
+### 3. In-progress flag (older copies)
 
-The script sets `system.dfap.oauth_refresh_in_progress = true` **before** `checkWebapi()`. If `checkWebapi` throws synchronously, the flag is never cleared. The next invoke logs skip and does nothing. After fixing the script, set `system.dfap.oauth_refresh_in_progress = false` once (or wait for a domain restart) so later runs are not skipped.
+Older copies set `oauth_refresh_in_progress = true` **before** `checkWebapi()`. A synchronous throw left the flag true and every later invoke skipped. Current script sets the flag only when the token fetch starts, ignores a boolean with no timestamp, and expires a timestamp after the token timeout.
 
 ### 4. API timeouts vs 20s retries
 
