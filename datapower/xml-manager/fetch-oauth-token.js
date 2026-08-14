@@ -10,17 +10,15 @@
  *
  * Health checks run every 20s through the 120s window (t=0,20,40,60,80,100).
  * webapi-init-check itself returns in milliseconds (ready vs not ready).
- * The remaining overlap risk is only the token fetch after a successful
- * attempt near t=100 (token timeout 56s can cross the next 120s tick).
+ * oauth_refresh_in_progress is set only when the token fetch starts, and
+ * expires after TOKEN_TIMEOUT_SEC so a failed first run cannot skip forever.
  */
 var url = require("urlopen");
 var system = require("system-metadata");
 var sm = require("service-metadata");
 
-// Extra attempts after the first call. 5 => 6 checks at 0/20/40/60/80/100s.
 var MAX_RETRIES = 5;
 var RETRY_DELAY_MS = 20000;
-// Hang safety only; the built-in health check answers immediately.
 var HEALTH_CHECK_TIMEOUT_SEC = 2;
 var TOKEN_TIMEOUT_SEC = 56;
 
@@ -49,7 +47,11 @@ function resolveDeviceConfig() {
 function discardResponse(response) {
     try {
         if (response && typeof response.discard === "function") {
-            response.discard();
+            response.discard(function (error) {
+                if (error) {
+                    console.error("discard error: " + JSON.stringify(error));
+                }
+            });
         }
     } catch (e) {
         // connection closes when the callback returns
@@ -58,15 +60,34 @@ function discardResponse(response) {
 
 function clearRefreshFlag() {
     system.dfap.oauth_refresh_in_progress = false;
+    system.dfap.oauth_refresh_started_at = 0;
+}
+
+function isRefreshInProgress() {
+    if (!system.dfap) {
+        return false;
+    }
+    var startedAt = Number(system.dfap.oauth_refresh_started_at);
+    if (startedAt > 0) {
+        var ageMs = Date.now() - startedAt;
+        return ageMs >= 0 && ageMs < ((TOKEN_TIMEOUT_SEC + 5) * 1000);
+    }
+    return false;
+}
+
+function markRefreshStarted() {
+    system.dfap.oauth_refresh_in_progress = true;
+    system.dfap.oauth_refresh_started_at = Date.now();
 }
 
 function checkWebapi(retriesLeft) {
     var attemptNum = MAX_RETRIES - retriesLeft + 1;
     var cfg = resolveDeviceConfig();
-    console.error(cfg.deviceName + ": health check #" + attemptNum + ". Retries left: " + retriesLeft);
+    var deviceName = (cfg && cfg.deviceName) ? cfg.deviceName : "Device Name Not Found";
+    console.error(deviceName + ": health check #" + attemptNum + ". Retries left: " + retriesLeft);
 
-    if (!cfg.tls_profile || !cfg.healthCheckTarget) {
-        console.warn("TLS profile / health-check URL not yet determined for device: " + cfg.deviceName + ". Configuration may be pending. Retrying...");
+    if (!cfg || !cfg.tls_profile || !cfg.healthCheckTarget) {
+        console.warn("TLS profile / health-check URL not yet determined for device: " + deviceName + ". Configuration may be pending. Retrying...");
         handleRetry(retriesLeft, "TLS Profile Not Found");
         return;
     }
@@ -99,18 +120,17 @@ function checkWebapi(retriesLeft) {
             discardResponse(response);
 
             if (statusCode === 401 || statusCode === 403) {
-                console.error("Permanent authentication error on " + cfg.deviceName + " health check (" + statusCode + "). Aborting retries.");
-                clearRefreshFlag();
+                console.error("Permanent authentication error on " + deviceName + " health check (" + statusCode + "). Aborting retries.");
                 return;
             }
 
             if (statusCode !== 200) {
-                console.error(cfg.deviceName + ": health check " + statusCode + ". Retrying...");
+                console.error(deviceName + ": health check " + statusCode + ". Retrying...");
                 handleRetry(retriesLeft, "Health Check Status " + statusCode);
                 return;
             }
 
-            console.error(cfg.deviceName + ": health check 200 on attempt #" + attemptNum + ". Fetching OAuth token.");
+            console.error(deviceName + ": health check 200 on attempt #" + attemptNum + ". Fetching OAuth token.");
             fetchToken(cfg.tls_profile);
         });
     } catch (e) {
@@ -125,6 +145,7 @@ function checkWebapi(retriesLeft) {
 }
 
 function fetchToken(tls_profile) {
+    markRefreshStarted();
     var options = {
         target: "http://miintegrate-dev-credentials-manager.dhhs-somhub-dev-dp-ns.svc.cluster.local/token?provider=dev_isd",
         method: "GET",
@@ -159,7 +180,7 @@ function fetchToken(tls_profile) {
                 }
 
                 if (!json || !json.access_token) {
-                    console.error("Token response missing access_token: " + JSON.stringify(json));
+                    console.error("Token response missing access_token");
                     clearRefreshFlag();
                     return;
                 }
@@ -172,7 +193,7 @@ function fetchToken(tls_profile) {
                 system.dfap.dev_instance_url = json.instance_url;
                 system.dfap.dev_issued_at = json.issued_at;
 
-                console.error("Successfully updated OAuth tokens in system.dfap for test and dev catalogs.");
+                console.error("Successfully updated dfap OAuth tokens in system.dfap for test and dev catalogs.");
                 clearRefreshFlag();
             });
         });
@@ -190,13 +211,12 @@ function handleRetry(retriesLeft, reason) {
         }, RETRY_DELAY_MS);
     } else {
         console.error("No more retries in this 120s window. Last error: " + reason + ". Next XML Manager tick will try again.");
-        clearRefreshFlag();
     }
 }
 
-if (system.dfap && system.dfap.oauth_refresh_in_progress) {
-    console.error("oauth-token-refresh: skip, a refresh from the previous tick is still running");
+if (isRefreshInProgress()) {
+    console.error("dfap oauth-token-refresh: skip, a token fetch from the previous tick is still running");
 } else {
-    system.dfap.oauth_refresh_in_progress = true;
+    clearRefreshFlag();
     checkWebapi(MAX_RETRIES);
 }
