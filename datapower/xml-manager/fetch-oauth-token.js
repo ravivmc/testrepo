@@ -1,15 +1,10 @@
 /**
- * XML Manager scheduled GatewayScript (IBM API Connect / DataPower v10.0.8.10).
- *
- * XML Manager interval: 120 seconds.
- *
  * Retry pattern matches the working OAuth xml-manager script (urlopen callback +
  * setTimeout recursion). The retry loop is the webapi health check, not the token
  * call. After HTTP 200 from /webapi-init-check, the credentials-manager token is
  * fetched once and stored on system.dfap.*.
  *
  * Health checks run every 20s through the 120s window (t=0,20,40,60,80,100).
- * webapi-init-check itself returns in milliseconds (ready vs not ready).
  * oauth_refresh_in_progress is set only when the token fetch starts, and
  * expires after TOKEN_TIMEOUT_SEC so a failed first run cannot skip forever.
  */
@@ -59,6 +54,7 @@ function discardResponse(response) {
 }
 
 function clearRefreshFlag() {
+    if (!system.dfap) { system.dfap = {}; }
     system.dfap.oauth_refresh_in_progress = false;
     system.dfap.oauth_refresh_started_at = 0;
 }
@@ -76,6 +72,7 @@ function isRefreshInProgress() {
 }
 
 function markRefreshStarted() {
+    if (!system.dfap) { system.dfap = {}; }
     system.dfap.oauth_refresh_in_progress = true;
     system.dfap.oauth_refresh_started_at = Date.now();
 }
