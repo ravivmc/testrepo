@@ -1,6 +1,6 @@
 # OAuth token fetch GatewayScript — how it executes
 
-Script: `fetch-oauth-token.js`
+Script: `dfap-oauth.js`
 
 This GatewayScript runs from an **XML Manager scheduled processing policy** on IBM DataPower (API Connect v10.0.8.10). The schedule interval is **120 seconds**. Each tick either skips, health-checks webapi until it is ready, or fetches an OAuth token after a successful health check.
 
