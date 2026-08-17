@@ -55,6 +55,7 @@ At the top of the script:
 - Skip only if a **token fetch** is in progress: `oauth_refresh_started_at` is set and newer than `TOKEN_TIMEOUT_SEC + 5s`.
 - The flag is **not** set at the start of the health-check loop. A failed first run cannot leave `oauth_refresh_in_progress=true` forever.
 - `clearRefreshFlag()` at the start of a normal tick also clears a leftover boolean from the older script.
+- `clearRefreshFlag()` and `markRefreshStarted()` initialize `system.dfap = {}` if it does not exist yet.
 - The flag is set in `fetchToken()` (`markRefreshStarted`) and cleared when that call finishes.
 
 The schedule itself is never disabled. Skip means “this invocation returns without work.”
