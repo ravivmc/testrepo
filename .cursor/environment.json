@@ -1,0 +1,4 @@
+{
+  "name": "testrepo",
+  "install": "python3 --version && node --version"
+}
